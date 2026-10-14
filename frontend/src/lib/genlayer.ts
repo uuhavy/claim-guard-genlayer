@@ -1,7 +1,7 @@
 import { Policy, ClaimRecord, PoolSummary, VerdictType } from '../types';
 
 export const GENLAYER_RPC = import.meta.env.VITE_GENLAYER_RPC_URL || 'https://studio.genlayer.com/api';
-export const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x71C6603F2D405788484e55e88865f32E351656f5';
+export const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x4Fb3074F563582e1FF253870B48D06387b0f346D';
 export const CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID || 61999);
 
 // Default in-memory state for initial render and responsive preview mode

@@ -31,7 +31,7 @@ ClaimGuard transforms flight delay insurance by replacing rigid, binary oracles 
 | :--- | :--- |
 | **GitHub Repository** | `https://github.com/<username>/claim-guard-genlayer` |
 | **Live Demo (Vercel)** | `https://claim-guard-genlayer.vercel.app` |
-| **Deployed Contract Address (Studionet / Bradbury)** | `0x71C6603F2D405788484e55e88865f32E351656f5` |
+| **Deployed Contract Address (Studionet / Bradbury)** | `0x4Fb3074F563582e1FF253870B48D06387b0f346D` |
 | **Video Demonstration / Loom** | `https://www.youtube.com/watch?v=placeholder` |
 | **Contract Source on Repo** | [`/contracts/claim_guard.py`](contracts/claim_guard.py) |
 | **Frontend Source on Repo** | [`/frontend`](frontend/) |
