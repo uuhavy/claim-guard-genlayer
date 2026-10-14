@@ -80,15 +80,26 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, userAdd
             </div>
 
             {/* Contract Address Pill */}
-            <button
-              onClick={copyContract}
-              title="Click to copy contract address"
-              className="hidden lg:flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-850 border border-slate-800 text-xs text-slate-400 hover:text-slate-200 transition-colors"
-            >
+            <div className="hidden lg:flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-400">
               <span className="text-[11px] font-mono text-slate-500">Contract:</span>
-              <span className="font-mono text-blue-400">{shortAddress(CONTRACT_ADDRESS)}</span>
-              {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
-            </button>
+              <button
+                onClick={copyContract}
+                title="Click to copy contract address"
+                className="font-mono text-blue-400 hover:underline flex items-center space-x-1"
+              >
+                <span>{shortAddress(CONTRACT_ADDRESS)}</span>
+                {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-slate-400" />}
+              </button>
+              <a
+                href={`https://studio.genlayer.com/contracts/${CONTRACT_ADDRESS}`}
+                target="_blank"
+                rel="noreferrer"
+                title="View on GenLayer Studio"
+                className="text-slate-400 hover:text-white p-0.5"
+              >
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
 
             {/* Connected Wallet */}
             <div className="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-600/10 to-indigo-600/10 border border-blue-500/30 text-xs text-blue-300">

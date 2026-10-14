@@ -1,6 +1,7 @@
 import React from 'react';
 import { Award, CheckCircle2, XCircle, AlertTriangle, Scale, ExternalLink, ShieldAlert, Cpu } from 'lucide-react';
 import { ClaimRecord } from '../types';
+import { CONTRACT_ADDRESS } from '../lib/genlayer';
 
 interface VerdictViewerProps {
   claim: ClaimRecord;
@@ -179,8 +180,17 @@ export const VerdictViewer: React.FC<VerdictViewerProps> = ({ claim, onFileAnoth
           )}
         </div>
 
-        {/* Action Button */}
-        <div className="pt-2 flex justify-center">
+        {/* Action Buttons */}
+        <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
+          <a
+            href={`https://studio.genlayer.com/contracts/${CONTRACT_ADDRESS}`}
+            target="_blank"
+            rel="noreferrer"
+            className="px-5 py-2.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-sm font-semibold transition-colors flex items-center space-x-2"
+          >
+            <span>View on GenLayer Studio</span>
+            <ExternalLink className="w-4 h-4" />
+          </a>
           <button
             onClick={onFileAnother}
             className="px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold transition-colors"
