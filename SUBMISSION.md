@@ -123,7 +123,16 @@ npm run dev
 ```
 Open `http://localhost:3000` in your browser.
 
-### C. 1-Click Test Scenarios Built into UI
+### C. Connect Wallet & Verify On-Chain Execution
+1. **Network Configuration:** Connect MetaMask to **GenLayer Studionet**:
+   - Network Name: `GenLayer Studionet`
+   - RPC URL: `https://studio.genlayer.com/api`
+   - Chain ID: `61999` (Hex: `0xf1ef`)
+   - Currency Symbol: `GEN`
+2. **Pure Contract Reads & Writes:** The frontend contains zero local mock or in-memory state. Every policy, claim verdict, pool statistic, and settlement is read directly from contract `0x4Fb3074F563582e1FF253870B48D06387b0f346D` via `client.readContract`.
+3. **Wallet Confirmation:** Each "Buy Policy" and "File Claim" transaction triggers a MetaMask signing modal and deducts testnet GEN fees / lockups directly on Studionet.
+
+### D. 1-Click Test Scenarios Built into UI
 The dApp includes 3 pre-loaded real-world scenarios in the **"1-Click Demos"** tab:
 1. **British Airways BA1420:** 4h 15m delay due to turbine maintenance $\rightarrow$ Verdict: **`APPROVE_FULL`** ($100\%$ Payout).
 2. **United Airlines UA901:** 2h 10m delay due to shared baggage/ATC hold $\rightarrow$ Verdict: **`APPROVE_PARTIAL`** ($50\%$ Payout).

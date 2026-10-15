@@ -1,17 +1,24 @@
 import React, { useState } from 'react';
-import { FileText, Globe, Radio, AlertCircle, Loader2, Sparkles, CheckCircle2, ChevronRight, ExternalLink } from 'lucide-react';
+import { FileText, Globe, Radio, AlertCircle, Loader2, Sparkles, ChevronRight, Wallet, AlertTriangle } from 'lucide-react';
 import { submitClaim, CONTRACT_ADDRESS } from '../lib/genlayer';
+import { WalletState } from '../lib/wallet';
 import { DEMO_SCENARIOS } from '../data/mockScenarios';
 import { Policy, ClaimRecord, DemoScenario } from '../types';
 
 interface FileClaimScreenProps {
   policies: Policy[];
+  walletState: WalletState;
+  onConnectWallet: () => void;
+  onSwitchNetwork: () => void;
   onClaimSettled: (claim: ClaimRecord) => void;
   selectedPolicyId?: string;
 }
 
 export const FileClaimScreen: React.FC<FileClaimScreenProps> = ({
   policies,
+  walletState,
+  onConnectWallet,
+  onSwitchNetwork,
   onClaimSettled,
   selectedPolicyId,
 }) => {
@@ -42,6 +49,16 @@ export const FileClaimScreen: React.FC<FileClaimScreenProps> = ({
     setErrorMsg('');
     setStatusMessage('');
 
+    if (!walletState.isConnected) {
+      onConnectWallet();
+      return;
+    }
+
+    if (!walletState.isCorrectNetwork) {
+      onSwitchNetwork();
+      return;
+    }
+
     if (!policyId) {
       setErrorMsg('Please select an active policy from the contract');
       return;
@@ -61,12 +78,12 @@ export const FileClaimScreen: React.FC<FileClaimScreenProps> = ({
 
     try {
       setIsEvaluating(true);
-      // Real on-chain file_claim execution on GenLayer Studionet
       const claim = await submitClaim(
         policyId,
         flightStatusUrl,
         airlineNoticeUrl,
         claimantStatement,
+        walletState.address,
         (msg) => setStatusMessage(msg)
       );
 
@@ -87,16 +104,52 @@ export const FileClaimScreen: React.FC<FileClaimScreenProps> = ({
           File Flight Disruption Claim
         </h2>
         <p className="text-slate-400 text-sm max-w-lg mx-auto">
-          Triggers on-chain non-deterministic execution (<code className="text-blue-400 font-mono text-xs">gl.vm.run_nondet_unsafe</code>). Validators crawl both URLs and reach LLM consensus on Studionet.
+          Requires signing with your connected wallet on Studionet. GenLayer validators crawl both URLs, run LLM inference, and settle payouts on-chain.
         </p>
       </div>
 
-      {/* 1-Click Preset Scenarios for Hackathon Judges */}
+      {/* Network Warning Banner */}
+      {walletState.isConnected && !walletState.isCorrectNetwork && (
+        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>Your wallet is on the wrong network. Please switch to GenLayer Studionet (Chain ID 61999).</span>
+          </div>
+          <button
+            onClick={onSwitchNetwork}
+            className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold shrink-0 ml-3"
+          >
+            Switch Network
+          </button>
+        </div>
+      )}
+
+      {/* Wallet Not Connected Banner */}
+      {!walletState.isConnected && (
+        <div className="p-5 rounded-2xl bg-blue-950/40 border border-blue-500/30 text-slate-300 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center space-x-3">
+            <Wallet className="w-5 h-5 text-blue-400 shrink-0" />
+            <div>
+              <p className="font-semibold text-white">Connect Wallet Required</p>
+              <p className="text-slate-400">Connect your wallet on Studionet to file claims and sign with your address.</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onConnectWallet}
+            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shrink-0 shadow-md shadow-blue-500/20"
+          >
+            Connect MetaMask
+          </button>
+        </div>
+      )}
+
+      {/* 1-Click Preset Scenarios */}
       <div className="glass-panel rounded-2xl p-4 sm:p-5 border border-indigo-500/20 bg-indigo-950/20 space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center space-x-1.5">
             <Sparkles className="w-4 h-4" />
-            <span>1-Click Hackathon Evidence Presets</span>
+            <span>Evidence Presets</span>
           </span>
           <span className="text-[11px] text-slate-400 font-mono">Real Web Evidence URLs</span>
         </div>
@@ -165,12 +218,10 @@ export const FileClaimScreen: React.FC<FileClaimScreenProps> = ({
         {/* Evidence URLs */}
         <div className="space-y-4">
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center space-x-1.5">
-                <Radio className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Flight Status / Radar Feed URL (crawled by gl.nondet.web.render)</span>
-              </label>
-            </div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center space-x-1.5">
+              <Radio className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Flight Radar URL (crawled by gl.nondet.web.render)</span>
+            </label>
             <input
               type="url"
               value={flightStatusUrl}
@@ -182,12 +233,10 @@ export const FileClaimScreen: React.FC<FileClaimScreenProps> = ({
           </div>
 
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center space-x-1.5">
-                <Globe className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Airline Notice / Bulletin URL (crawled by gl.nondet.web.render)</span>
-              </label>
-            </div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center space-x-1.5">
+              <Globe className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Airline Notice URL (crawled by gl.nondet.web.render)</span>
+            </label>
             <input
               type="url"
               value={airlineNoticeUrl}
@@ -214,15 +263,15 @@ export const FileClaimScreen: React.FC<FileClaimScreenProps> = ({
           />
         </div>
 
-        {/* Real On-Chain Execution Status */}
+        {/* Status or Submit Button */}
         {isEvaluating ? (
           <div className="p-6 rounded-2xl bg-blue-950/30 border border-blue-500/30 space-y-4">
             <div className="flex items-center space-x-3 text-xs font-mono text-blue-300">
               <Loader2 className="w-5 h-5 animate-spin text-blue-400 shrink-0" />
-              <span className="font-semibold">{statusMessage || 'Transacting with GenLayer Validators...'}</span>
+              <span className="font-semibold">{statusMessage || 'Awaiting wallet signature...'}</span>
             </div>
             <p className="text-[11px] text-slate-400">
-              GenLayer nodes are independently executing <code className="text-slate-300">gl.nondet.web.render</code> and <code className="text-slate-300">gl.nondet.exec_prompt</code> to achieve decentralized semantic consensus.
+              Confirm the transaction in your wallet. GenLayer validators will crawl the evidence and execute consensus on Studionet.
             </p>
           </div>
         ) : (
@@ -230,7 +279,11 @@ export const FileClaimScreen: React.FC<FileClaimScreenProps> = ({
             type="submit"
             className="w-full py-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-sm sm:text-base transition-all shadow-lg shadow-blue-600/25 flex items-center justify-center space-x-2"
           >
-            <span>Convene AI Validator Jury On-Chain</span>
+            <span>
+              {walletState.isConnected
+                ? 'Sign & Convene AI Validator Jury On-Chain'
+                : 'Connect Wallet to File Claim'}
+            </span>
             <ChevronRight className="w-5 h-5" />
           </button>
         )}

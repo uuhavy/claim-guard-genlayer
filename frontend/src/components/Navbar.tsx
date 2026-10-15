@@ -1,14 +1,23 @@
 import React, { useState } from 'react';
-import { Shield, Plane, Activity, Copy, Check, ExternalLink, Wallet } from 'lucide-react';
+import { Shield, Plane, Copy, Check, ExternalLink, Wallet, AlertTriangle, ArrowRight } from 'lucide-react';
 import { CONTRACT_ADDRESS, CHAIN_ID } from '../lib/genlayer';
+import { WalletState } from '../lib/wallet';
 
 interface NavbarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
-  userAddress: string;
+  walletState: WalletState;
+  onConnect: () => void;
+  onSwitchNetwork: () => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, userAddress }) => {
+export const Navbar: React.FC<NavbarProps> = ({
+  activeTab,
+  setActiveTab,
+  walletState,
+  onConnect,
+  onSwitchNetwork,
+}) => {
   const [copied, setCopied] = useState(false);
 
   const copyContract = () => {
@@ -21,7 +30,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, userAdd
     addr ? `${addr.substring(0, 6)}...${addr.substring(addr.length - 4)}` : '';
 
   return (
-    <header className="sticky top-0 z-50 glass-panel border-b border-slate-800/80 bg-slate-950/80">
+    <header className="sticky top-0 z-50 glass-panel border-b border-slate-800/80 bg-slate-950/90 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo & Brand */}
@@ -38,7 +47,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, userAdd
                   ClaimGuard
                 </span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/30">
-                  GenLayer
+                  Studionet
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">Autonomous AI Parametric Insurance</p>
@@ -52,7 +61,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, userAdd
               { id: 'buy', label: 'Buy Policy' },
               { id: 'claim', label: 'File Claim' },
               { id: 'verdicts', label: 'AI Jury Verdicts' },
-              { id: 'scenarios', label: '1-Click Demos' },
+              { id: 'scenarios', label: 'Demo Presets' },
             ].map(tab => (
               <button
                 key={tab.id}
@@ -70,17 +79,8 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, userAdd
 
           {/* Right Network & Wallet Status */}
           <div className="flex items-center space-x-3">
-            {/* Studionet / Testnet Status */}
-            <div className="hidden sm:flex items-center space-x-2 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-xs">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span className="text-slate-300 font-mono">Studionet ({CHAIN_ID})</span>
-            </div>
-
             {/* Contract Address Pill */}
-            <div className="hidden lg:flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-400">
+            <div className="hidden xl:flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-400">
               <span className="text-[11px] font-mono text-slate-500">Contract:</span>
               <button
                 onClick={copyContract}
@@ -101,11 +101,45 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, userAdd
               </a>
             </div>
 
-            {/* Connected Wallet */}
-            <div className="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-600/10 to-indigo-600/10 border border-blue-500/30 text-xs text-blue-300">
-              <Wallet className="w-3.5 h-3.5 text-blue-400" />
-              <span className="font-mono font-medium">{shortAddress(userAddress)}</span>
-            </div>
+            {/* Network Status / Switch Button */}
+            {walletState.isConnected && !walletState.isCorrectNetwork ? (
+              <button
+                onClick={onSwitchNetwork}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-xs text-amber-300 hover:bg-amber-500/30 font-semibold animate-pulse"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                <span>Switch to Studionet</span>
+              </button>
+            ) : walletState.isConnected ? (
+              <div className="hidden sm:flex items-center space-x-2 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-xs">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span className="text-slate-300 font-mono">Studionet ({CHAIN_ID})</span>
+              </div>
+            ) : null}
+
+            {/* Wallet Button */}
+            {walletState.isConnected ? (
+              <div className="flex items-center space-x-2">
+                <div className="hidden sm:block px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-emerald-400">
+                  {walletState.balance} GEN
+                </div>
+                <div className="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-600/10 to-indigo-600/10 border border-blue-500/30 text-xs text-blue-300">
+                  <Wallet className="w-3.5 h-3.5 text-blue-400" />
+                  <span className="font-mono font-medium">{shortAddress(walletState.address)}</span>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={onConnect}
+                className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold transition-all shadow-md shadow-blue-500/20"
+              >
+                <Wallet className="w-3.5 h-3.5" />
+                <span>Connect Wallet</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

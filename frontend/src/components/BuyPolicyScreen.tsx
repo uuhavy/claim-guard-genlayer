@@ -1,16 +1,21 @@
 import React, { useState } from 'react';
-import { Plane, Calendar, Shield, Sparkles, CheckCircle2, AlertCircle, Loader2, ExternalLink } from 'lucide-react';
+import { Plane, Calendar, Shield, Sparkles, CheckCircle2, AlertCircle, Loader2, Wallet, AlertTriangle } from 'lucide-react';
 import { purchasePolicy, CONTRACT_ADDRESS } from '../lib/genlayer';
+import { WalletState } from '../lib/wallet';
 import { Policy } from '../types';
 
 interface BuyPolicyScreenProps {
-  userAddress: string;
+  walletState: WalletState;
+  onConnectWallet: () => void;
+  onSwitchNetwork: () => void;
   onPolicyCreated: (newPolicy: Policy) => void;
   onSuccessNavigate: () => void;
 }
 
 export const BuyPolicyScreen: React.FC<BuyPolicyScreenProps> = ({
-  userAddress,
+  walletState,
+  onConnectWallet,
+  onSwitchNetwork,
   onPolicyCreated,
   onSuccessNavigate,
 }) => {
@@ -50,6 +55,16 @@ export const BuyPolicyScreen: React.FC<BuyPolicyScreenProps> = ({
     setErrorMsg('');
     setStatusMessage('');
 
+    if (!walletState.isConnected) {
+      onConnectWallet();
+      return;
+    }
+
+    if (!walletState.isCorrectNetwork) {
+      onSwitchNetwork();
+      return;
+    }
+
     if (!flightNumber.trim()) {
       setErrorMsg('Please specify a flight number');
       return;
@@ -66,13 +81,14 @@ export const BuyPolicyScreen: React.FC<BuyPolicyScreenProps> = ({
         departureDate,
         policyPreset,
         premiumGen,
+        walletState.address,
         (msg) => setStatusMessage(msg)
       );
       setSuccessResult(result);
       onPolicyCreated(result.policy);
     } catch (err: any) {
       console.error('Buy policy on-chain transaction failed:', err);
-      setErrorMsg(err?.message || 'Transaction failed on GenLayer Studionet');
+      setErrorMsg(err?.message || 'Transaction failed or rejected in wallet');
     } finally {
       setIsSubmitting(false);
     }
@@ -86,9 +102,45 @@ export const BuyPolicyScreen: React.FC<BuyPolicyScreenProps> = ({
           Purchase Autonomous Flight Coverage
         </h2>
         <p className="text-slate-400 text-sm max-w-lg mx-auto">
-          Executes real <code className="text-blue-400">buy_policy</code> transaction directly on GenLayer Intelligent Contract <code className="text-slate-300 font-mono text-xs">{CONTRACT_ADDRESS.slice(0, 10)}...</code>.
+          Requires signing with your connected wallet on GenLayer Studionet. Deducts testnet <code className="text-blue-400 font-mono text-xs">{premiumGen} GEN</code> to lock coverage pool.
         </p>
       </div>
+
+      {/* Network Warning Banner */}
+      {walletState.isConnected && !walletState.isCorrectNetwork && (
+        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>Your wallet is connected to a different network. Please switch to GenLayer Studionet (Chain ID 61999).</span>
+          </div>
+          <button
+            onClick={onSwitchNetwork}
+            className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold shrink-0 ml-3"
+          >
+            Switch Network
+          </button>
+        </div>
+      )}
+
+      {/* Wallet Not Connected Banner */}
+      {!walletState.isConnected && (
+        <div className="p-5 rounded-2xl bg-blue-950/40 border border-blue-500/30 text-slate-300 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center space-x-3">
+            <Wallet className="w-5 h-5 text-blue-400 shrink-0" />
+            <div>
+              <p className="font-semibold text-white">Connect Wallet Required</p>
+              <p className="text-slate-400">Connect your MetaMask wallet on Studionet to buy coverage and sign transactions.</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onConnectWallet}
+            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shrink-0 shadow-md shadow-blue-500/20"
+          >
+            Connect MetaMask
+          </button>
+        </div>
+      )}
 
       {successResult ? (
         <div className="glass-panel rounded-3xl p-8 border border-emerald-500/30 text-center space-y-5 animate-in fade-in duration-300">
@@ -108,7 +160,7 @@ export const BuyPolicyScreen: React.FC<BuyPolicyScreenProps> = ({
 
           <div className="grid grid-cols-2 gap-4 max-w-sm mx-auto text-left p-4 rounded-xl bg-slate-900/80 border border-slate-800">
             <div>
-              <p className="text-xs text-slate-500">Premium Locked</p>
+              <p className="text-xs text-slate-500">Premium Deducted</p>
               <p className="text-lg font-bold text-blue-400 font-mono">{successResult.policy.premium} GEN</p>
             </div>
             <div>
@@ -143,7 +195,7 @@ export const BuyPolicyScreen: React.FC<BuyPolicyScreenProps> = ({
             <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm flex items-start space-x-2">
               <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
               <div>
-                <p className="font-semibold">On-Chain Transaction Error</p>
+                <p className="font-semibold">Transaction Error</p>
                 <p className="text-xs opacity-90 mt-0.5">{errorMsg}</p>
               </div>
             </div>
@@ -188,7 +240,7 @@ export const BuyPolicyScreen: React.FC<BuyPolicyScreenProps> = ({
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                   Select Premium
                 </label>
-                <p className="text-xs text-slate-500">Payable amount attached to on-chain transaction</p>
+                <p className="text-xs text-slate-500">Payable GEN deducted from your wallet upon signature</p>
               </div>
               <div className="text-right">
                 <span className="text-xl font-bold text-blue-400 font-mono">{premiumGen} GEN</span>
@@ -258,20 +310,23 @@ export const BuyPolicyScreen: React.FC<BuyPolicyScreenProps> = ({
             <div className="p-5 rounded-2xl bg-blue-950/30 border border-blue-500/30 space-y-3">
               <div className="flex items-center space-x-3 text-blue-300">
                 <Loader2 className="w-5 h-5 animate-spin text-blue-400 shrink-0" />
-                <span className="text-xs font-mono font-medium">{statusMessage || 'Processing transaction on GenLayer...'}</span>
+                <span className="text-xs font-mono font-medium">{statusMessage || 'Awaiting wallet signature...'}</span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Transaction is interacting with GenLayer Studionet validators. Waiting for block inclusion and majority agree.
+                Please approve the transaction in MetaMask. Then GenLayer Studionet validators will process consensus.
               </p>
             </div>
           ) : (
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="w-full py-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-sm sm:text-base transition-all shadow-lg shadow-blue-600/25 flex items-center justify-center space-x-2 disabled:opacity-50"
+              className="w-full py-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-sm sm:text-base transition-all shadow-lg shadow-blue-600/25 flex items-center justify-center space-x-2"
             >
               <Shield className="w-5 h-5" />
-              <span>Lock {premiumGen} GEN & Execute On-Chain Buy</span>
+              <span>
+                {walletState.isConnected
+                  ? `Sign & Lock ${premiumGen} GEN via Wallet`
+                  : 'Connect Wallet to Purchase'}
+              </span>
             </button>
           )}
         </form>

@@ -1,19 +1,18 @@
 import { createClient, createAccount, generatePrivateKey } from 'genlayer-js';
 import { studionet } from 'genlayer-js/chains';
 import { Policy, ClaimRecord, PoolSummary } from '../types';
+import { isEthereumAvailable } from './wallet';
 
 export const GENLAYER_RPC = import.meta.env.VITE_GENLAYER_RPC_URL || 'https://studio.genlayer.com/api';
-export const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x4Fb3074F563582e1FF253870B48D06387b0f346D';
+export const CONTRACT_ADDRESS: `0x${string}` = (import.meta.env.VITE_CONTRACT_ADDRESS || '0x4Fb3074F563582e1FF253870B48D06387b0f346D') as `0x${string}`;
 export const CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID || 61999);
 
-// Manage persistent in-browser account so user identity remains consistent
+// Read-only / fallback account for query reads
 export function getStoredAccount() {
   let pk = '';
   try {
     pk = localStorage.getItem('claimguard_user_pk') || '';
-  } catch (e) {
-    // SSR / test fallback
-  }
+  } catch (e) {}
   if (!pk) {
     pk = generatePrivateKey();
     try {
@@ -23,17 +22,25 @@ export function getStoredAccount() {
   return createAccount(pk as `0x${string}`);
 }
 
-let cachedClient: any = null;
-
-export function getClient() {
-  if (!cachedClient) {
-    const account = getStoredAccount();
-    cachedClient = createClient({
+/**
+ * Returns a GenLayer client.
+ * If userAddress is provided and window.ethereum is available, routes through user's MetaMask!
+ */
+export function getClient(userAddress?: string) {
+  if (userAddress && isEthereumAvailable()) {
+    const ethereum = (window as any).ethereum;
+    return createClient({
       chain: studionet,
-      account,
+      account: userAddress as `0x${string}`,
+      provider: ethereum,
     });
   }
-  return cachedClient;
+
+  const account = getStoredAccount();
+  return createClient({
+    chain: studionet,
+    account,
+  });
 }
 
 /**
@@ -150,19 +157,24 @@ export async function fetchAllClaims(): Promise<ClaimRecord[]> {
 }
 
 /**
- * Executes on-chain buy_policy transaction and reads confirmed state
+ * Executes on-chain buy_policy transaction requiring user wallet signature
  */
 export async function purchasePolicy(
   flightNumber: string,
   departureDate: string,
   policyTerms: string,
   premiumGen: number,
+  userAddress: string,
   onStatusUpdate?: (status: string) => void
 ): Promise<{ policy: Policy; txHash: string }> {
-  const client = getClient();
+  if (!userAddress) {
+    throw new Error('Please connect your MetaMask wallet on GenLayer Studionet before purchasing coverage.');
+  }
+
+  const client = getClient(userAddress);
   const weiValue = BigInt(Math.floor(premiumGen * 1e18));
 
-  onStatusUpdate?.('Submitting buy_policy to GenLayer Studionet...');
+  onStatusUpdate?.('Please confirm and sign the transaction in your connected wallet...');
   const txHash = await client.writeContract({
     address: CONTRACT_ADDRESS,
     functionName: 'buy_policy',
@@ -171,19 +183,19 @@ export async function purchasePolicy(
   });
 
   if (!txHash) {
-    throw new Error('Transaction submission failed: No transaction hash returned by GenLayer RPC.');
+    throw new Error('Transaction rejected or failed in wallet.');
   }
 
-  onStatusUpdate?.(`Transaction broadcast: ${txHash.slice(0, 10)}... Awaiting on-chain consensus receipt...`);
-  const receipt = await client.waitForTransactionReceipt({ hash: txHash });
+  onStatusUpdate?.(`Transaction signed & broadcast: ${txHash.slice(0, 10)}... Waiting for on-chain consensus receipt...`);
+  const receipt: any = await client.waitForTransactionReceipt({ hash: txHash });
 
-  if (receipt.result_name && receipt.result_name !== 'MAJORITY_AGREE' && receipt.result_name !== 'AGREE') {
-    throw new Error(`On-chain transaction consensus rejected: ${receipt.result_name}`);
+  const buyResultName = receipt.resultName || receipt.result_name;
+  if (buyResultName && buyResultName !== 'MAJORITY_AGREE' && buyResultName !== 'AGREE') {
+    throw new Error(`On-chain transaction consensus rejected: ${buyResultName}`);
   }
 
   onStatusUpdate?.('Consensus reached! Reading newly issued policy directly from contract...');
 
-  // Read latest total_policies from contract
   const summaryRes = await client.readContract({
     address: CONTRACT_ADDRESS,
     functionName: 'get_pool_summary',
@@ -215,33 +227,40 @@ export async function purchasePolicy(
 }
 
 /**
- * Executes on-chain file_claim transaction and reads confirmed AI Jury ruling
+ * Executes on-chain file_claim transaction requiring user wallet signature
  */
 export async function submitClaim(
   policyId: string,
   flightStatusUrl: string,
   airlineNoticeUrl: string,
   claimantStatement: string,
+  userAddress: string,
   onStatusUpdate?: (status: string) => void
 ): Promise<ClaimRecord> {
-  const client = getClient();
+  if (!userAddress) {
+    throw new Error('Please connect your MetaMask wallet on GenLayer Studionet before filing a claim.');
+  }
 
-  onStatusUpdate?.('Convening on-chain AI Validator Jury via GenLayer...');
+  const client = getClient(userAddress);
+
+  onStatusUpdate?.('Please confirm and sign the claim transaction in your connected wallet...');
   const txHash = await client.writeContract({
     address: CONTRACT_ADDRESS,
     functionName: 'file_claim',
     args: [policyId, flightStatusUrl, airlineNoticeUrl, claimantStatement],
+    value: BigInt(0),
   });
 
   if (!txHash) {
-    throw new Error('Transaction submission failed: No transaction hash returned by GenLayer RPC.');
+    throw new Error('Claim transaction rejected or failed in wallet.');
   }
 
-  onStatusUpdate?.(`Transaction ${txHash.slice(0, 10)}... broadcast. Validators crawling web & executing LLM inference...`);
-  const receipt = await client.waitForTransactionReceipt({ hash: txHash });
+  onStatusUpdate?.(`Transaction broadcast (${txHash.slice(0, 10)}...). GenLayer validators crawling web evidence & running LLM consensus...`);
+  const receipt: any = await client.waitForTransactionReceipt({ hash: txHash });
 
-  if (receipt.result_name && receipt.result_name !== 'MAJORITY_AGREE' && receipt.result_name !== 'AGREE') {
-    throw new Error(`On-chain AI Jury consensus rejected transaction: ${receipt.result_name}`);
+  const claimResultName = receipt.resultName || receipt.result_name;
+  if (claimResultName && claimResultName !== 'MAJORITY_AGREE' && claimResultName !== 'AGREE') {
+    throw new Error(`On-chain AI Jury consensus rejected transaction: ${claimResultName}`);
   }
 
   onStatusUpdate?.('Consensus achieved! Reading verified judicial ruling directly from contract...');

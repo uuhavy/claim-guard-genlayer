@@ -6,13 +6,20 @@ import { FileClaimScreen } from './components/FileClaimScreen';
 import { VerdictViewer } from './components/VerdictViewer';
 import { PolicyList } from './components/PolicyList';
 import { DemoScenariosScreen } from './components/DemoScenariosScreen';
-import { fetchPoolSummary, fetchAllPolicies, fetchAllClaims, getStoredAccount, CONTRACT_ADDRESS } from './lib/genlayer';
+import { fetchPoolSummary, fetchAllPolicies, fetchAllClaims, CONTRACT_ADDRESS } from './lib/genlayer';
+import { WalletState, checkWalletConnection, connectWallet, switchToStudionet } from './lib/wallet';
 import { Policy, ClaimRecord, PoolSummary, DemoScenario } from './types';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [userAddress, setUserAddress] = useState<string>('');
+  const [walletState, setWalletState] = useState<WalletState>({
+    address: '',
+    chainId: null,
+    balance: '0',
+    isConnected: false,
+    isCorrectNetwork: false,
+  });
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [claims, setClaims] = useState<ClaimRecord[]>([]);
   const [summary, setSummary] = useState<PoolSummary>({
@@ -32,10 +39,6 @@ export const App: React.FC = () => {
     try {
       setIsLoading(true);
       setLoadError('');
-
-      // Get persistent user session account
-      const acc = getStoredAccount();
-      setUserAddress(acc.address);
 
       // Fetch all state directly from the Intelligent Contract
       const [sum, pols, clms] = await Promise.all([
@@ -62,13 +65,64 @@ export const App: React.FC = () => {
     }
   };
 
+  // Wallet event listeners and initial check
   useEffect(() => {
+    checkWalletConnection().then(setWalletState);
     loadOnChainData();
+
+    if (typeof window !== 'undefined' && (window as any).ethereum) {
+      const ethereum = (window as any).ethereum;
+
+      const handleAccountsChanged = async () => {
+        const state = await checkWalletConnection();
+        setWalletState(state);
+        loadOnChainData();
+      };
+
+      const handleChainChanged = async () => {
+        const state = await checkWalletConnection();
+        setWalletState(state);
+        loadOnChainData();
+      };
+
+      ethereum.on('accountsChanged', handleAccountsChanged);
+      ethereum.on('chainChanged', handleChainChanged);
+
+      return () => {
+        if (ethereum.removeListener) {
+          ethereum.removeListener('accountsChanged', handleAccountsChanged);
+          ethereum.removeListener('chainChanged', handleChainChanged);
+        }
+      };
+    }
   }, []);
+
+  const handleConnectWallet = async () => {
+    try {
+      const state = await connectWallet();
+      setWalletState(state);
+    } catch (err: any) {
+      console.error('Wallet connection failed:', err);
+      alert(err?.message || 'Failed to connect wallet');
+    }
+  };
+
+  const handleSwitchNetwork = async () => {
+    try {
+      await switchToStudionet();
+      const state = await checkWalletConnection();
+      setWalletState(state);
+    } catch (err: any) {
+      console.error('Failed to switch network:', err);
+      alert(err?.message || 'Failed to switch network');
+    }
+  };
 
   const handlePolicyCreated = async (newPolicy: Policy) => {
     // Re-fetch genuine state directly from contract
     await loadOnChainData();
+    const updatedState = await checkWalletConnection();
+    setWalletState(updatedState);
     setActiveTab('dashboard');
   };
 
@@ -76,6 +130,8 @@ export const App: React.FC = () => {
     setLatestClaim(claim);
     // Re-fetch genuine state directly from contract
     await loadOnChainData();
+    const updatedState = await checkWalletConnection();
+    setWalletState(updatedState);
     setActiveTab('verdicts');
   };
 
@@ -93,7 +149,13 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      <Navbar activeTab={activeTab} setActiveTab={setActiveTab} userAddress={userAddress} />
+      <Navbar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        walletState={walletState}
+        onConnect={handleConnectWallet}
+        onSwitchNetwork={handleSwitchNetwork}
+      />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {loadError && (
@@ -129,7 +191,9 @@ export const App: React.FC = () => {
 
         {activeTab === 'buy' && (
           <BuyPolicyScreen
-            userAddress={userAddress}
+            walletState={walletState}
+            onConnectWallet={handleConnectWallet}
+            onSwitchNetwork={handleSwitchNetwork}
             onPolicyCreated={handlePolicyCreated}
             onSuccessNavigate={() => setActiveTab('dashboard')}
           />
@@ -139,6 +203,9 @@ export const App: React.FC = () => {
           <FileClaimScreen
             policies={policies}
             selectedPolicyId={selectedPolicyId}
+            walletState={walletState}
+            onConnectWallet={handleConnectWallet}
+            onSwitchNetwork={handleSwitchNetwork}
             onClaimSettled={handleClaimSettled}
           />
         )}
