@@ -1,242 +1,279 @@
-import { Policy, ClaimRecord, PoolSummary, VerdictType } from '../types';
+import { createClient, createAccount, generatePrivateKey } from 'genlayer-js';
+import { studionet } from 'genlayer-js/chains';
+import { Policy, ClaimRecord, PoolSummary } from '../types';
 
 export const GENLAYER_RPC = import.meta.env.VITE_GENLAYER_RPC_URL || 'https://studio.genlayer.com/api';
 export const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x4Fb3074F563582e1FF253870B48D06387b0f346D';
 export const CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID || 61999);
 
-// Default in-memory state for initial render and responsive preview mode
-let inMemoryPolicies: Policy[] = [
-  {
-    policy_id: 'POL-000001',
-    holder: '0x38F14E3b2169E2E416f082e668D8436E92b51336',
-    flight_number: 'BA1420',
-    departure_date: '2026-10-20',
-    policy_terms: 'Severe delay >= 3 hours or cancellation. 100% coverage.',
-    premium: 0.02,
-    coverage_amount: 0.10,
-    status: 'ACTIVE',
-    created_index: 1,
-  },
-  {
-    policy_id: 'POL-000002',
-    holder: '0x38F14E3b2169E2E416f082e668D8436E92b51336',
-    flight_number: 'LH400',
-    departure_date: '2026-10-25',
-    policy_terms: 'Delay >= 3 hours pays 100%. Weather exclusion applies.',
-    premium: 0.01,
-    coverage_amount: 0.05,
-    status: 'ACTIVE',
-    created_index: 2,
-  }
-];
-
-let inMemoryClaims: ClaimRecord[] = [];
-
-let inMemorySummary: PoolSummary = {
-  total_policies: 2,
-  total_claims: 0,
-  total_coverage_pool: 0.15,
-  total_premiums_collected: 0.03,
-  total_payouts_distributed: 0,
-  active_coverage: 0.15,
-};
-
-// Check if genlayer-js client can be initialized
-let glClient: any = null;
-
-async function getClient() {
-  if (glClient) return glClient;
+// Manage persistent in-browser account so user identity remains consistent
+export function getStoredAccount() {
+  let pk = '';
   try {
-    const { createClient, createAccount } = await import('genlayer-js');
-    const { studionet } = await import('genlayer-js/chains');
-    const account = createAccount();
-    glClient = createClient({
+    pk = localStorage.getItem('claimguard_user_pk') || '';
+  } catch (e) {
+    // SSR / test fallback
+  }
+  if (!pk) {
+    pk = generatePrivateKey();
+    try {
+      localStorage.setItem('claimguard_user_pk', pk);
+    } catch (e) {}
+  }
+  return createAccount(pk as `0x${string}`);
+}
+
+let cachedClient: any = null;
+
+export function getClient() {
+  if (!cachedClient) {
+    const account = getStoredAccount();
+    cachedClient = createClient({
       chain: studionet,
       account,
     });
-    return glClient;
-  } catch (err) {
-    console.warn('GenLayer-js client initialized in simulation mode:', err);
-    return null;
   }
+  return cachedClient;
 }
 
+/**
+ * Reads aggregate pool statistics directly from Intelligent Contract get_pool_summary()
+ */
 export async function fetchPoolSummary(): Promise<PoolSummary> {
-  try {
-    const client = await getClient();
-    if (client && CONTRACT_ADDRESS && CONTRACT_ADDRESS !== '0x...') {
-      const res = await client.readContract({
-        address: CONTRACT_ADDRESS,
-        functionName: 'get_pool_summary',
-        args: [],
-      });
-      if (res) {
-        const parsed = typeof res === 'string' ? JSON.parse(res) : res;
-        return {
-          total_policies: Number(parsed.total_policies || 0),
-          total_claims: Number(parsed.total_claims || 0),
-          total_coverage_pool: Number(parsed.total_coverage_pool || 0) / 1e18,
-          total_premiums_collected: Number(parsed.total_premiums_collected || 0) / 1e18,
-          total_payouts_distributed: Number(parsed.total_payouts_distributed || 0) / 1e18,
-          active_coverage: Number(parsed.active_coverage || 0) / 1e18,
-        };
-      }
-    }
-  } catch (e) {
-    // Graceful fallback to interactive memory state
+  const client = getClient();
+  const res = await client.readContract({
+    address: CONTRACT_ADDRESS,
+    functionName: 'get_pool_summary',
+    args: [],
+  });
+
+  if (!res) {
+    throw new Error('Empty response from contract get_pool_summary');
   }
-  return { ...inMemorySummary };
+
+  const data = typeof res === 'string' ? JSON.parse(res) : res;
+  return {
+    total_policies: Number(data.total_policies || 0),
+    total_claims: Number(data.total_claims || 0),
+    total_coverage_pool: Number(data.total_coverage_pool || 0) / 1e18,
+    total_premiums_collected: Number(data.total_premiums_collected || 0) / 1e18,
+    total_payouts_distributed: Number(data.total_payouts_distributed || 0) / 1e18,
+    active_coverage: Number(data.active_coverage || 0) / 1e18,
+  };
 }
 
+/**
+ * Reads all active & historical policies directly from the Intelligent Contract
+ */
 export async function fetchAllPolicies(): Promise<Policy[]> {
-  return [...inMemoryPolicies];
+  const client = getClient();
+  const summaryRes = await client.readContract({
+    address: CONTRACT_ADDRESS,
+    functionName: 'get_pool_summary',
+    args: [],
+  });
+
+  const summary = typeof summaryRes === 'string' ? JSON.parse(summaryRes) : summaryRes;
+  const total = Number(summary.total_policies || 0);
+
+  const policies: Policy[] = [];
+  for (let i = total; i >= 1; i--) {
+    const polId = `POL-${String(i).padStart(6, '0')}`;
+    try {
+      const polRes = await client.readContract({
+        address: CONTRACT_ADDRESS,
+        functionName: 'get_policy',
+        args: [polId],
+      });
+      const p = typeof polRes === 'string' ? JSON.parse(polRes) : polRes;
+      policies.push({
+        policy_id: p.policy_id,
+        holder: p.holder,
+        flight_number: p.flight_number,
+        departure_date: p.departure_date,
+        policy_terms: p.policy_terms,
+        premium: Number(p.premium) / 1e18,
+        coverage_amount: Number(p.coverage_amount) / 1e18,
+        status: p.status,
+        created_index: Number(p.created_index),
+      });
+    } catch (e) {
+      console.warn(`Policy ${polId} read warning:`, e);
+    }
+  }
+  return policies;
 }
 
+/**
+ * Reads all settled claim records directly from the Intelligent Contract
+ */
+export async function fetchAllClaims(): Promise<ClaimRecord[]> {
+  const client = getClient();
+  const summaryRes = await client.readContract({
+    address: CONTRACT_ADDRESS,
+    functionName: 'get_pool_summary',
+    args: [],
+  });
+
+  const summary = typeof summaryRes === 'string' ? JSON.parse(summaryRes) : summaryRes;
+  const total = Number(summary.total_claims || 0);
+
+  const claims: ClaimRecord[] = [];
+  for (let i = total; i >= 1; i--) {
+    const claimId = `CLAIM-${String(i).padStart(6, '0')}`;
+    try {
+      const claimRes = await client.readContract({
+        address: CONTRACT_ADDRESS,
+        functionName: 'get_claim',
+        args: [claimId],
+      });
+      const c = typeof claimRes === 'string' ? JSON.parse(claimRes) : claimRes;
+      claims.push({
+        claim_id: c.claim_id,
+        policy_id: c.policy_id,
+        claimant: c.claimant,
+        flight_status_url: c.flight_status_url,
+        airline_notice_url: c.airline_notice_url,
+        claimant_statement: c.claimant_statement,
+        verdict: c.verdict,
+        payout_ratio: Number(c.payout_ratio),
+        payout_amount: Number(c.payout_amount) / 1e18,
+        confidence: Number(c.confidence),
+        rationale: c.rationale,
+        resolved_index: Number(c.resolved_index),
+      });
+    } catch (e) {
+      console.warn(`Claim ${claimId} read warning:`, e);
+    }
+  }
+  return claims;
+}
+
+/**
+ * Executes on-chain buy_policy transaction and reads confirmed state
+ */
 export async function purchasePolicy(
   flightNumber: string,
   departureDate: string,
   policyTerms: string,
   premiumGen: number,
-  userAddress: string
-): Promise<Policy> {
-  const coverageGen = premiumGen * 5;
-  const nextIndex = inMemoryPolicies.length + 1;
-  const polId = `POL-${String(nextIndex).padStart(6, '0')}`;
+  onStatusUpdate?: (status: string) => void
+): Promise<{ policy: Policy; txHash: string }> {
+  const client = getClient();
+  const weiValue = BigInt(Math.floor(premiumGen * 1e18));
 
-  try {
-    const client = await getClient();
-    if (client && CONTRACT_ADDRESS && CONTRACT_ADDRESS !== '0x...') {
-      const weiValue = BigInt(Math.floor(premiumGen * 1e18));
-      await client.writeContract({
-        address: CONTRACT_ADDRESS,
-        functionName: 'buy_policy',
-        args: [flightNumber, departureDate, policyTerms],
-        value: weiValue,
-      });
-    }
-  } catch (err) {
-    console.warn('Simulating on-chain policy purchase in local state:', err);
+  onStatusUpdate?.('Submitting buy_policy to GenLayer Studionet...');
+  const txHash = await client.writeContract({
+    address: CONTRACT_ADDRESS,
+    functionName: 'buy_policy',
+    args: [flightNumber, departureDate, policyTerms],
+    value: weiValue,
+  });
+
+  if (!txHash) {
+    throw new Error('Transaction submission failed: No transaction hash returned by GenLayer RPC.');
   }
 
-  const newPolicy: Policy = {
-    policy_id: polId,
-    holder: userAddress,
-    flight_number: flightNumber.toUpperCase(),
-    departure_date: departureDate,
-    policy_terms: policyTerms,
-    premium: premiumGen,
-    coverage_amount: coverageGen,
-    status: 'ACTIVE',
-    created_index: nextIndex,
+  onStatusUpdate?.(`Transaction broadcast: ${txHash.slice(0, 10)}... Awaiting on-chain consensus receipt...`);
+  const receipt = await client.waitForTransactionReceipt({ hash: txHash });
+
+  if (receipt.result_name && receipt.result_name !== 'MAJORITY_AGREE' && receipt.result_name !== 'AGREE') {
+    throw new Error(`On-chain transaction consensus rejected: ${receipt.result_name}`);
+  }
+
+  onStatusUpdate?.('Consensus reached! Reading newly issued policy directly from contract...');
+
+  // Read latest total_policies from contract
+  const summaryRes = await client.readContract({
+    address: CONTRACT_ADDRESS,
+    functionName: 'get_pool_summary',
+    args: [],
+  });
+  const summary = typeof summaryRes === 'string' ? JSON.parse(summaryRes) : summaryRes;
+  const latestId = `POL-${String(summary.total_policies).padStart(6, '0')}`;
+
+  const polRes = await client.readContract({
+    address: CONTRACT_ADDRESS,
+    functionName: 'get_policy',
+    args: [latestId],
+  });
+  const p = typeof polRes === 'string' ? JSON.parse(polRes) : polRes;
+
+  const policy: Policy = {
+    policy_id: p.policy_id,
+    holder: p.holder,
+    flight_number: p.flight_number,
+    departure_date: p.departure_date,
+    policy_terms: p.policy_terms,
+    premium: Number(p.premium) / 1e18,
+    coverage_amount: Number(p.coverage_amount) / 1e18,
+    status: p.status,
+    created_index: Number(p.created_index),
   };
 
-  inMemoryPolicies.unshift(newPolicy);
-  inMemorySummary.total_policies += 1;
-  inMemorySummary.total_premiums_collected += premiumGen;
-  inMemorySummary.total_coverage_pool += coverageGen;
-  inMemorySummary.active_coverage += coverageGen;
-
-  return newPolicy;
+  return { policy, txHash };
 }
 
+/**
+ * Executes on-chain file_claim transaction and reads confirmed AI Jury ruling
+ */
 export async function submitClaim(
   policyId: string,
   flightStatusUrl: string,
   airlineNoticeUrl: string,
   claimantStatement: string,
-  scenarioHint?: { verdict: VerdictType; ratio: number; rationale?: string }
+  onStatusUpdate?: (status: string) => void
 ): Promise<ClaimRecord> {
-  const policy = inMemoryPolicies.find(p => p.policy_id === policyId);
-  if (!policy) {
-    throw new Error(`Policy ${policyId} not found`);
+  const client = getClient();
+
+  onStatusUpdate?.('Convening on-chain AI Validator Jury via GenLayer...');
+  const txHash = await client.writeContract({
+    address: CONTRACT_ADDRESS,
+    functionName: 'file_claim',
+    args: [policyId, flightStatusUrl, airlineNoticeUrl, claimantStatement],
+  });
+
+  if (!txHash) {
+    throw new Error('Transaction submission failed: No transaction hash returned by GenLayer RPC.');
   }
 
-  // Artificial short delay to simulate GenLayer optimistic democracy consensus & web crawling
-  await new Promise(r => setTimeout(r, 2200));
+  onStatusUpdate?.(`Transaction ${txHash.slice(0, 10)}... broadcast. Validators crawling web & executing LLM inference...`);
+  const receipt = await client.waitForTransactionReceipt({ hash: txHash });
 
-  let verdict: VerdictType = 'APPROVE_FULL';
-  let payoutRatio = 100;
-  let confidence = 95;
-  let rationale = `The AI Validator Jury crawled radar data (${flightStatusUrl}) and carrier notice (${airlineNoticeUrl}). ` +
-    `Confirmed flight ${policy.flight_number} suffered a critical delay of 4 hours 15 minutes due to turbine maintenance. ` +
-    `The carrier accepted liability, fulfilling the policy terms. Full payout approved.`;
-
-  if (scenarioHint) {
-    verdict = scenarioHint.verdict;
-    payoutRatio = scenarioHint.ratio;
-    if (verdict === 'REJECT') {
-      confidence = 98;
-      rationale = `The AI Validator Jury independently fetched radar telemetry and airline press records. ` +
-        `Radar logs confirm flight ${policy.flight_number} arrived on schedule (7 minutes ahead of time). ` +
-        `Zero operational delay occurred. Claim is fraudulent or invalid under policy terms. Payout rejected.`;
-    } else if (verdict === 'APPROVE_PARTIAL') {
-      confidence = 82;
-      rationale = `The AI Validator Jury evaluated flight ${policy.flight_number}. Radar indicates 2 hours 10 minutes delay. ` +
-        `Carrier notice proves combined ground handling and airspace flow control issues. ` +
-        `In accordance with tier schedule, partial 50% payout ratio is awarded.`;
-    }
-  } else {
-    // Heuristic inference based on URLs and statement if no preset selected
-    const lowerStmt = claimantStatement.toLowerCase();
-    if (lowerStmt.includes('cancel') || lowerStmt.includes('4 hour') || lowerStmt.includes('engine') || lowerStmt.includes('severe')) {
-      verdict = 'APPROVE_FULL';
-      payoutRatio = 100;
-      confidence = 94;
-    } else if (lowerStmt.includes('2 hour') || lowerStmt.includes('partial') || lowerStmt.includes('minor')) {
-      verdict = 'APPROVE_PARTIAL';
-      payoutRatio = 50;
-      confidence = 84;
-    } else if (lowerStmt.includes('ontime') || lowerStmt.includes('early') || lowerStmt.includes('baggage')) {
-      verdict = 'REJECT';
-      payoutRatio = 0;
-      confidence = 97;
-    }
+  if (receipt.result_name && receipt.result_name !== 'MAJORITY_AGREE' && receipt.result_name !== 'AGREE') {
+    throw new Error(`On-chain AI Jury consensus rejected transaction: ${receipt.result_name}`);
   }
 
-  const nextClaimIndex = inMemoryClaims.length + 1;
-  const claimId = `CLAIM-${String(nextClaimIndex).padStart(6, '0')}`;
-  let onChainTxHash = '';
-  try {
-    const client = await getClient();
-    if (client && CONTRACT_ADDRESS && CONTRACT_ADDRESS.startsWith('0x')) {
-      const tx = await client.writeContract({
-        address: CONTRACT_ADDRESS,
-        functionName: 'file_claim',
-        args: [policyId, flightStatusUrl, airlineNoticeUrl, claimantStatement],
-      });
-      if (tx) {
-        onChainTxHash = typeof tx === 'string' ? tx : (tx.hash || tx.id || '');
-      }
-    }
-  } catch (err) {
-    console.warn('On-chain file_claim interaction dispatched:', err);
-  }
+  onStatusUpdate?.('Consensus achieved! Reading verified judicial ruling directly from contract...');
 
-  const txHash = onChainTxHash || ('0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join(''));
+  const summaryRes = await client.readContract({
+    address: CONTRACT_ADDRESS,
+    functionName: 'get_pool_summary',
+    args: [],
+  });
+  const summary = typeof summaryRes === 'string' ? JSON.parse(summaryRes) : summaryRes;
+  const latestClaimId = `CLAIM-${String(summary.total_claims).padStart(6, '0')}`;
 
-  const payoutAmount = (policy.coverage_amount * payoutRatio) / 100;
+  const claimRes = await client.readContract({
+    address: CONTRACT_ADDRESS,
+    functionName: 'get_claim',
+    args: [latestClaimId],
+  });
+  const c = typeof claimRes === 'string' ? JSON.parse(claimRes) : claimRes;
 
-  const claimRec: ClaimRecord = {
-    claim_id: claimId,
-    policy_id: policyId,
-    claimant: policy.holder,
-    flight_status_url: flightStatusUrl,
-    airline_notice_url: airlineNoticeUrl,
-    claimant_statement: claimantStatement,
-    verdict,
-    payout_ratio: payoutRatio,
-    payout_amount: payoutAmount,
-    confidence,
-    rationale,
-    resolved_index: nextClaimIndex,
-    txHash,
+  return {
+    claim_id: c.claim_id,
+    policy_id: c.policy_id,
+    claimant: c.claimant,
+    flight_status_url: c.flight_status_url,
+    airline_notice_url: c.airline_notice_url,
+    claimant_statement: c.claimant_statement,
+    verdict: c.verdict,
+    payout_ratio: Number(c.payout_ratio),
+    payout_amount: Number(c.payout_amount) / 1e18,
+    confidence: Number(c.confidence),
+    rationale: c.rationale,
+    resolved_index: Number(c.resolved_index),
+    txHash: txHash,
   };
-
-  policy.status = verdict === 'REJECT' ? 'REJECTED' : 'SETTLED';
-  inMemoryClaims.unshift(claimRec);
-  inMemorySummary.total_claims += 1;
-  inMemorySummary.total_payouts_distributed += payoutAmount;
-  inMemorySummary.active_coverage = Math.max(0, inMemorySummary.active_coverage - policy.coverage_amount);
-
-  return claimRec;
 }

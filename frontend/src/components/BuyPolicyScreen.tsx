@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Plane, Calendar, Shield, Sparkles, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
-import { purchasePolicy } from '../lib/genlayer';
+import { Plane, Calendar, Shield, Sparkles, CheckCircle2, AlertCircle, Loader2, ExternalLink } from 'lucide-react';
+import { purchasePolicy, CONTRACT_ADDRESS } from '../lib/genlayer';
 import { Policy } from '../types';
 
 interface BuyPolicyScreenProps {
@@ -16,12 +16,13 @@ export const BuyPolicyScreen: React.FC<BuyPolicyScreenProps> = ({
 }) => {
   const [flightNumber, setFlightNumber] = useState('BA1420');
   const [departureDate, setDepartureDate] = useState('2026-10-20');
-  const [premiumGen, setPremiumGen] = useState(0.02);
+  const [premiumGen, setPremiumGen] = useState(0.01);
   const [policyPreset, setPolicyPreset] = useState(
     'Severe delay >= 3 hours or cancellation. Payout 100% of coverage pool.'
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [successPolicy, setSuccessPolicy] = useState<Policy | null>(null);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [successResult, setSuccessResult] = useState<{ policy: Policy; txHash: string } | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
 
   const coverageGen = Number((premiumGen * 5).toFixed(3));
@@ -47,6 +48,8 @@ export const BuyPolicyScreen: React.FC<BuyPolicyScreenProps> = ({
   const handleBuy = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+    setStatusMessage('');
+
     if (!flightNumber.trim()) {
       setErrorMsg('Please specify a flight number');
       return;
@@ -58,17 +61,18 @@ export const BuyPolicyScreen: React.FC<BuyPolicyScreenProps> = ({
 
     try {
       setIsSubmitting(true);
-      const policy = await purchasePolicy(
+      const result = await purchasePolicy(
         flightNumber.trim(),
         departureDate,
         policyPreset,
         premiumGen,
-        userAddress
+        (msg) => setStatusMessage(msg)
       );
-      setSuccessPolicy(policy);
-      onPolicyCreated(policy);
+      setSuccessResult(result);
+      onPolicyCreated(result.policy);
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Failed to purchase policy');
+      console.error('Buy policy on-chain transaction failed:', err);
+      setErrorMsg(err?.message || 'Transaction failed on GenLayer Studionet');
     } finally {
       setIsSubmitting(false);
     }
@@ -82,58 +86,66 @@ export const BuyPolicyScreen: React.FC<BuyPolicyScreenProps> = ({
           Purchase Autonomous Flight Coverage
         </h2>
         <p className="text-slate-400 text-sm max-w-lg mx-auto">
-          Lock in coverage on GenLayer. In the event of disruption, decentralized AI validators verify your flight radar telemetry and settle payouts automatically.
+          Executes real <code className="text-blue-400">buy_policy</code> transaction directly on GenLayer Intelligent Contract <code className="text-slate-300 font-mono text-xs">{CONTRACT_ADDRESS.slice(0, 10)}...</code>.
         </p>
       </div>
 
-      {successPolicy ? (
+      {successResult ? (
         <div className="glass-panel rounded-3xl p-8 border border-emerald-500/30 text-center space-y-5 animate-in fade-in duration-300">
           <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400 shadow-lg shadow-emerald-500/20">
             <CheckCircle2 className="w-8 h-8" />
           </div>
           <div className="space-y-1">
             <span className="text-xs font-mono uppercase tracking-wider text-emerald-400 font-semibold">
-              Policy Successfully Issued On-Chain
+              Policy Confirmed On-Chain via GenLayer Consensus
             </span>
-            <h3 className="text-2xl font-bold text-white font-mono">{successPolicy.policy_id}</h3>
+            <h3 className="text-2xl font-bold text-white font-mono">{successResult.policy.policy_id}</h3>
             <p className="text-slate-400 text-sm">
-              Covering flight <strong className="text-white">{successPolicy.flight_number}</strong> on{' '}
-              <span className="text-slate-200">{successPolicy.departure_date}</span>
+              Covering flight <strong className="text-white">{successResult.policy.flight_number}</strong> on{' '}
+              <span className="text-slate-200">{successResult.policy.departure_date}</span>
             </p>
           </div>
 
           <div className="grid grid-cols-2 gap-4 max-w-sm mx-auto text-left p-4 rounded-xl bg-slate-900/80 border border-slate-800">
             <div>
               <p className="text-xs text-slate-500">Premium Locked</p>
-              <p className="text-lg font-bold text-blue-400 font-mono">{successPolicy.premium} GEN</p>
+              <p className="text-lg font-bold text-blue-400 font-mono">{successResult.policy.premium} GEN</p>
             </div>
             <div>
-              <p className="text-xs text-slate-500">Guaranteed Coverage</p>
-              <p className="text-lg font-bold text-emerald-400 font-mono">{successPolicy.coverage_amount} GEN</p>
+              <p className="text-xs text-slate-500">Coverage Pool</p>
+              <p className="text-lg font-bold text-emerald-400 font-mono">{successResult.policy.coverage_amount} GEN</p>
             </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 max-w-md mx-auto text-left text-xs font-mono">
+            <span className="text-slate-500 block mb-1">On-Chain Transaction Hash:</span>
+            <span className="text-blue-400 break-all">{successResult.txHash}</span>
           </div>
 
           <div className="pt-2 flex justify-center space-x-3">
             <button
-              onClick={() => setSuccessPolicy(null)}
+              onClick={() => setSuccessResult(null)}
               className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-medium transition-colors"
             >
-              Buy Another Policy
+              Issue Another Policy
             </button>
             <button
               onClick={onSuccessNavigate}
               className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-all shadow-md shadow-blue-500/20"
             >
-              View Active Policies
+              View Contract Policies
             </button>
           </div>
         </div>
       ) : (
         <form onSubmit={handleBuy} className="glass-panel rounded-3xl p-6 sm:p-8 space-y-6">
           {errorMsg && (
-            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm flex items-center space-x-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMsg}</span>
+            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm flex items-start space-x-2">
+              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold">On-Chain Transaction Error</p>
+                <p className="text-xs opacity-90 mt-0.5">{errorMsg}</p>
+              </div>
             </div>
           )}
 
@@ -186,7 +198,7 @@ export const BuyPolicyScreen: React.FC<BuyPolicyScreenProps> = ({
             <input
               type="range"
               min="0.01"
-              max="0.20"
+              max="0.10"
               step="0.01"
               value={premiumGen}
               onChange={e => setPremiumGen(parseFloat(e.target.value))}
@@ -242,23 +254,26 @@ export const BuyPolicyScreen: React.FC<BuyPolicyScreenProps> = ({
           </div>
 
           {/* Submit */}
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full py-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-sm sm:text-base transition-all shadow-lg shadow-blue-600/25 flex items-center justify-center space-x-2 disabled:opacity-50"
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                <span>Confirming Transaction on GenLayer...</span>
-              </>
-            ) : (
-              <>
-                <Shield className="w-5 h-5" />
-                <span>Lock {premiumGen} GEN & Activate Coverage</span>
-              </>
-            )}
-          </button>
+          {isSubmitting ? (
+            <div className="p-5 rounded-2xl bg-blue-950/30 border border-blue-500/30 space-y-3">
+              <div className="flex items-center space-x-3 text-blue-300">
+                <Loader2 className="w-5 h-5 animate-spin text-blue-400 shrink-0" />
+                <span className="text-xs font-mono font-medium">{statusMessage || 'Processing transaction on GenLayer...'}</span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Transaction is interacting with GenLayer Studionet validators. Waiting for block inclusion and majority agree.
+              </p>
+            </div>
+          ) : (
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full py-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-sm sm:text-base transition-all shadow-lg shadow-blue-600/25 flex items-center justify-center space-x-2 disabled:opacity-50"
+            >
+              <Shield className="w-5 h-5" />
+              <span>Lock {premiumGen} GEN & Execute On-Chain Buy</span>
+            </button>
+          )}
         </form>
       )}
     </div>

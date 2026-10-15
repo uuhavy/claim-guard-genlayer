@@ -6,69 +6,83 @@ import { FileClaimScreen } from './components/FileClaimScreen';
 import { VerdictViewer } from './components/VerdictViewer';
 import { PolicyList } from './components/PolicyList';
 import { DemoScenariosScreen } from './components/DemoScenariosScreen';
-import { fetchPoolSummary, fetchAllPolicies } from './lib/genlayer';
+import { fetchPoolSummary, fetchAllPolicies, fetchAllClaims, getStoredAccount, CONTRACT_ADDRESS } from './lib/genlayer';
 import { Policy, ClaimRecord, PoolSummary, DemoScenario } from './types';
-import { DEMO_SCENARIOS } from './data/mockScenarios';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [userAddress] = useState('0x38F14E3b2169E2E416f082e668D8436E92b51336');
+  const [userAddress, setUserAddress] = useState<string>('');
   const [policies, setPolicies] = useState<Policy[]>([]);
+  const [claims, setClaims] = useState<ClaimRecord[]>([]);
   const [summary, setSummary] = useState<PoolSummary>({
-    total_policies: 2,
+    total_policies: 0,
     total_claims: 0,
-    total_coverage_pool: 0.15,
-    total_premiums_collected: 0.03,
+    total_coverage_pool: 0,
+    total_premiums_collected: 0,
     total_payouts_distributed: 0,
-    active_coverage: 0.15,
+    active_coverage: 0,
   });
   const [latestClaim, setLatestClaim] = useState<ClaimRecord | null>(null);
-  const [selectedPolicyId, setSelectedPolicyId] = useState<string>('POL-000001');
+  const [selectedPolicyId, setSelectedPolicyId] = useState<string>('');
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string>('');
 
-  useEffect(() => {
-    const loadInitialData = async () => {
-      try {
-        const [sum, pols] = await Promise.all([fetchPoolSummary(), fetchAllPolicies()]);
-        setSummary(sum);
-        setPolicies(pols);
-      } catch (e) {
-        console.error('Failed to load initial data:', e);
+  const loadOnChainData = async () => {
+    try {
+      setIsLoading(true);
+      setLoadError('');
+
+      // Get persistent user session account
+      const acc = getStoredAccount();
+      setUserAddress(acc.address);
+
+      // Fetch all state directly from the Intelligent Contract
+      const [sum, pols, clms] = await Promise.all([
+        fetchPoolSummary(),
+        fetchAllPolicies(),
+        fetchAllClaims(),
+      ]);
+
+      setSummary(sum);
+      setPolicies(pols);
+      setClaims(clms);
+
+      if (clms.length > 0) {
+        setLatestClaim(clms[0]);
       }
-    };
-    loadInitialData();
-  }, []);
-
-  const handlePolicyCreated = (newPolicy: Policy) => {
-    setPolicies(prev => [newPolicy, ...prev]);
-    setSummary(prev => ({
-      ...prev,
-      total_policies: prev.total_policies + 1,
-      total_premiums_collected: prev.total_premiums_collected + newPolicy.premium,
-      total_coverage_pool: prev.total_coverage_pool + newPolicy.coverage_amount,
-      active_coverage: prev.active_coverage + newPolicy.coverage_amount,
-    }));
+      if (pols.length > 0) {
+        setSelectedPolicyId(pols[0].policy_id);
+      }
+    } catch (e: any) {
+      console.error('Failed to load contract state:', e);
+      setLoadError(e?.message || 'Error connecting to GenLayer Intelligent Contract');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleClaimSettled = (claim: ClaimRecord) => {
+  useEffect(() => {
+    loadOnChainData();
+  }, []);
+
+  const handlePolicyCreated = async (newPolicy: Policy) => {
+    // Re-fetch genuine state directly from contract
+    await loadOnChainData();
+    setActiveTab('dashboard');
+  };
+
+  const handleClaimSettled = async (claim: ClaimRecord) => {
     setLatestClaim(claim);
-    setPolicies(prev =>
-      prev.map(p =>
-        p.policy_id === claim.policy_id
-          ? { ...p, status: claim.verdict === 'REJECT' ? 'REJECTED' : 'SETTLED' }
-          : p
-      )
-    );
-    setSummary(prev => ({
-      ...prev,
-      total_claims: prev.total_claims + 1,
-      total_payouts_distributed: prev.total_payouts_distributed + claim.payout_amount,
-      active_coverage: Math.max(0, prev.active_coverage - claim.payout_amount * 5),
-    }));
+    // Re-fetch genuine state directly from contract
+    await loadOnChainData();
     setActiveTab('verdicts');
   };
 
   const handleSelectScenario = (scenario: DemoScenario) => {
-    setSelectedPolicyId(policies[0]?.policy_id || 'POL-000001');
+    if (policies.length > 0) {
+      setSelectedPolicyId(policies[0].policy_id);
+    }
     setActiveTab('claim');
   };
 
@@ -82,6 +96,22 @@ export const App: React.FC = () => {
       <Navbar activeTab={activeTab} setActiveTab={setActiveTab} userAddress={userAddress} />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {loadError && (
+          <div className="mb-6 p-4 rounded-2xl bg-red-950/40 border border-red-500/30 text-red-300 flex items-center justify-between">
+            <div className="flex items-center space-x-2 text-xs">
+              <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+              <span>Contract Read Notice: {loadError}</span>
+            </div>
+            <button
+              onClick={loadOnChainData}
+              className="px-3 py-1 rounded-lg bg-red-600/30 hover:bg-red-600/50 text-white text-xs font-semibold flex items-center space-x-1"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Retry</span>
+            </button>
+          </div>
+        )}
+
         {activeTab === 'dashboard' && (
           <div className="space-y-10">
             <DashboardStats
@@ -114,30 +144,11 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'verdicts' && (
-          <div>
-            {latestClaim ? (
-              <VerdictViewer
-                claim={latestClaim}
-                onFileAnother={() => setActiveTab('claim')}
-              />
-            ) : (
-              <div className="glass-panel rounded-3xl p-12 text-center max-w-md mx-auto space-y-4">
-                <div className="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-400 flex items-center justify-center mx-auto border border-blue-500/20">
-                  <span className="font-mono text-lg font-bold">gl</span>
-                </div>
-                <h3 className="text-xl font-bold text-white">No Verdict Rendered Yet</h3>
-                <p className="text-sm text-slate-400">
-                  Submit a claim to convene GenLayer's AI validator court and view the judicial ruling in real time.
-                </p>
-                <button
-                  onClick={() => setActiveTab('claim')}
-                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-all shadow-md shadow-blue-500/20"
-                >
-                  File a Claim Now
-                </button>
-              </div>
-            )}
-          </div>
+          <VerdictViewer
+            claims={claims}
+            activeClaim={latestClaim}
+            onFileAnother={() => setActiveTab('claim')}
+          />
         )}
 
         {activeTab === 'scenarios' && (
@@ -150,8 +161,15 @@ export const App: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
           <div>
             <p>
-              ClaimGuard &copy; 2026. Built natively for the{' '}
-              <strong className="text-slate-300">GenLayer Blockchain</strong>.
+              ClaimGuard &copy; 2026. Intelligent Contract:{' '}
+              <a
+                href={`https://studio.genlayer.com/contracts/${CONTRACT_ADDRESS}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-blue-400 hover:underline font-mono"
+              >
+                {CONTRACT_ADDRESS}
+              </a>
             </p>
           </div>
           <div className="flex items-center space-x-4 font-mono">
